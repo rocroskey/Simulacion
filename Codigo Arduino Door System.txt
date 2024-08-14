@@ -1,0 +1,232 @@
+#include <Servo.h>
+#include <LiquidCrystal_I2C.h>
+#include <Keypad.h>
+#include <string.h> // Necesario para strcmp
+
+#ifndef PASSWORD_H
+#define PASSWORD_H
+
+#define MAX_PASSWORD_LENGTH (20)
+#define STRING_TERMINATOR '\0'
+
+// Clase Password para manejar contraseñas
+class Password {
+public:
+    Password(char* pass);  
+    void set(char* pass);  // Configura la contraseña
+    bool is(char* pass);   // Verifica si la contraseña ingresada es correcta
+    bool append(char character);  // Añade un carácter a la contraseña ingresada
+    void reset();  // Reinicia la contraseña ingresada
+    bool evaluate();  // Compara la contraseña ingresada con la contraseña almacenada
+
+    Password &operator=(char* pass);
+    bool operator==(char* pass);
+    bool operator!=(char* pass);
+    Password &operator<<(char character);
+
+private:
+    char* target;
+    char guess[MAX_PASSWORD_LENGTH];
+    byte currentIndex;
+};
+
+#endif
+
+// Implementación de la clase Password
+Password::Password(char* pass) {
+    set(pass);
+    reset();
+}
+
+void Password::set(char* pass) {
+    target = pass;
+}
+
+bool Password::is(char* pass) {
+    return strcmp(target, pass) == 0;  // Utiliza strcmp para comparar contraseñas
+}
+
+bool Password::append(char character) {
+    if (currentIndex + 1 == MAX_PASSWORD_LENGTH) {
+        return false;
+    } else {
+        guess[currentIndex++] = character;
+        guess[currentIndex] = STRING_TERMINATOR;  // Asegura que sea una cadena válida
+    }
+    return true;
+}
+
+void Password::reset() {
+    currentIndex = 0;
+    guess[currentIndex] = STRING_TERMINATOR;  // Reinicia la contraseña ingresada
+}
+
+bool Password::evaluate() {
+    return strcmp(target, guess) == 0;  // Compara la contraseña almacenada con la ingresada
+}
+
+Password& Password::operator=(char* pass) {
+    set(pass);
+    return *this;
+}
+
+bool Password::operator==(char* pass) {
+    return is(pass);
+}
+
+bool Password::operator!=(char* pass) {
+    return !is(pass);
+}
+
+Password& Password::operator<<(char character) {
+    append(character);
+    return *this;
+}
+
+// Definición de pines y variables globales
+#define buzzer 11
+Servo servo;
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+Password password = Password("1608"); // Contraseña predeterminada
+
+byte a = 5;  // Posición inicial del cursor en la LCD
+bool value = true;
+byte maxPasswordLength = 6;  // Longitud máxima de la contraseña
+byte currentPasswordLength = 0;
+
+const byte ROWS = 4; // Número de filas en el teclado
+const byte COLS = 4; // Número de columnas en el teclado
+
+char keys[ROWS][COLS] = {
+  {'D', 'C', 'B', 'A'},
+  {'#', '9', '6', '3'},
+  {'0', '8', '5', '2'},
+  {'*', '7', '4', '1'},
+};
+
+byte rowPins[ROWS] = {2, 3, 4, 5};
+byte colPins[COLS] = {6, 7, 8, 9};
+
+Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
+
+void setup() {
+    Serial.begin(9600);
+    pinMode(buzzer, OUTPUT);
+    servo.attach(10);
+    servo.write(50);  // Posición inicial del servo (cerrado)
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0);
+    lcd.print("BIENVENIDO");
+    lcd.setCursor(0, 1);
+    lcd.print("SISTEMA PUERTA");
+    delay(1500);  // Reducción del delay
+    lcd.clear();
+}
+
+void loop() {
+    lcd.setCursor(0, 0);
+    lcd.print("INGRESA CLAVE:");
+
+    char key = keypad.getKey();
+    if (key != NO_KEY) {
+        delay(20);  // Reducción del delay
+        if (key == 'C') {
+            resetPassword();  // Resetea la contraseña ingresada
+        } else if (key == 'D') {
+            if (value) {
+                doorlocked();  // Bloquea la puerta
+                value = false;
+            } else {
+                dooropen();  // Abre la puerta
+                value = true;
+            }
+        } else {
+            processNumberKey(key);  // Procesa la tecla numérica ingresada
+        }
+    }
+}
+
+// Procesa las teclas numéricas ingresadas
+void processNumberKey(char key) {
+    lcd.setCursor(a, 1);
+    lcd.print("*");  // Muestra un asterisco por seguridad
+    a++;
+    
+    if (a == 11) {
+        a = 5;
+    }
+
+    currentPasswordLength++;
+    password.append(key);  // Añade el número a la contraseña
+
+    if (currentPasswordLength == maxPasswordLength) {
+        if (password.evaluate()) {
+            dooropen();  // Abre la puerta si la contraseña es correcta
+        } else {
+            doorlocked();  // Bloquea la puerta si la contraseña es incorrecta
+        }
+    }
+}
+
+// Abre la puerta si la contraseña es correcta
+void dooropen() {
+    if (password.evaluate()) {
+        digitalWrite(buzzer, HIGH);
+        delay(150);  // Reducción del delay
+        digitalWrite(buzzer, LOW);
+        servo.write(50);  // Posición para abrir la puerta
+        lcd.setCursor(0, 0);
+        lcd.print("CLAVE CORRECTA");
+        lcd.setCursor(0, 1);
+        lcd.print("PUERTA ABIERTA");
+        delay(1000);  // Reducción del delay
+        lcd.clear();
+    } else {
+        wrongPasswordAlert();  // Llama a la función de alerta de contraseña incorrecta
+    }
+    resetPassword();  // Resetea la contraseña ingresada
+}
+
+// Bloquea la puerta si la contraseña es correcta
+void doorlocked() {
+    if (password.evaluate()) {
+        digitalWrite(buzzer, HIGH);
+        delay(150);  // Reducción del delay
+        digitalWrite(buzzer, LOW);
+        servo.write(110);  // Posición para cerrar la puerta
+        lcd.setCursor(0, 0);
+        lcd.print("CLAVE CORRECTA");
+        lcd.setCursor(2, 1);
+        lcd.print("PUERTA CERRADA");
+        delay(1000);  // Reducción del delay
+        lcd.clear();
+    } else {
+        wrongPasswordAlert();  // Llama a la función de alerta de contraseña incorrecta
+    }
+    resetPassword();  // Resetea la contraseña ingresada
+}
+
+// Alerta de contraseña incorrecta
+void wrongPasswordAlert() {
+    for (int i = 0; i < 3; i++) {  // Alerta de sonido de error
+        digitalWrite(buzzer, HIGH);
+        delay(100);  // Reducción del delay
+        digitalWrite(buzzer, LOW);
+        delay(100);  // Reducción del delay
+    }
+    lcd.setCursor(0, 0);
+    lcd.print("CLAVE ERRADA");
+    lcd.setCursor(0, 1);
+    lcd.print("INTENTA DE NUEVO");
+    delay(1000);  // Reducción del delay
+    lcd.clear();
+}
+
+// Resetea la contraseña ingresada
+void resetPassword() {
+    password.reset();
+    currentPasswordLength = 0;
+    lcd.clear();
+    a = 5;  // Reinicia la posición del cursor en la LCD
+}
